@@ -34,17 +34,164 @@ function App() {
     return arr;
   }
 
-  async function connectZilpay() {}
+  async function connectZilpay() {
+    try {
+      await window.zilPay.wallet.connect();
+      if (window.zilPay.wallet.isConnect) {
+       setZilpayConnected(true);
+      } else {
+       alert("Zilpay connection failed, try again...");
+      }
+     } catch (error) {
+      console.log(error);
+     }
+  }
 
-  function updateContractAddress() {}
+  function updateContractAddress() {
+    setContractAddress(tempContractAddress);
+  }
 
-  async function updateContractDetails() {}
+  async function updateContractDetails() {
+    try {
+      const contractAddressBech32 = toBech32Address(contractAddress);
+      const contract = window.zilPay.contracts.at(contractAddressBech32);
+      const contractDetails = await contract.getState();
+     setContractState(contractDetails);
+     const walletAddress =
+      window.zilPay.wallet.defaultAccount.base16.toLowerCase();
+     const ownedTickets = getKeyByValue(
+      contractDetails.token_owners,
+      walletAddress
+     );
+   
+     setOwnedTokensInformation(null);
+     if (ownedTickets.length !== 0) {
+      setOwnedTokenIDs(ownedTickets);
+      const tokenURIs = ownedTickets.map(
+       (value) => `${contractDetails.base_uri}${value}`
+      );
+      const responses = await Promise.all(
+       tokenURIs.map(async (tokenURI) => await fetch(tokenURI))
+      );
+      const tokenMetadata = await Promise.all(
+       responses.map(async (value) => await value.json())
+      );
+      setOwnedTokensInformation(tokenMetadata);
+     }
+    } catch (error) {
+     console.log(error);
+    }   
+  }
 
-  async function handleMint() {}
+  async function handleMint() {
+    setIsMinting(true);
+ const zilliqa = window.zilPay;
+ const CHAIN_ID = 333;
+ const MSG_VERSION = 1;
+ const VERSION = bytes.pack(CHAIN_ID, MSG_VERSION);
+ const myGasPrice = units.toQa("2000", units.Units.Li);
+ const ftAddr = toBech32Address(contractAddress);
+ try {
+  const contract = zilliqa.contracts.at(ftAddr);
+  await contract.call(
+   "Mint",
+   [
+    {
+     vname: "to",
+     type: "ByStr20",
+     value: window.zilPay.wallet.defaultAccount.base16,
+    },
+    {
+     vname: "token_uri",
+     type: "String",
+     value: "",
+    },
+   ],
+   {
+    // amount, gasPrice and gasLimit must be explicitly provided
+    version: VERSION,
+    amount: new BN(contractState.token_price),
+    gasPrice: myGasPrice,
+    gasLimit: Long.fromNumber(10000),
+   }
+  );
+  await eventLogSubscription();
+ } catch (error) {
+  console.log(error);
+ }
+}
 
-  async function handleBatchMint() {}
+  async function handleBatchMint() {
+    if (mintNumber === 0) {
+      return;
+     }
+     setIsBatchMinting(true);
+     const batchMintParameters = constructBatchMintParameters(mintNumber);
+     const zilliqa = window.zilPay;
+     const CHAIN_ID = 333;
+     const MSG_VERSION = 1;
+     const VERSION = bytes.pack(CHAIN_ID, MSG_VERSION);
+     const myGasPrice = units.toQa("2000", units.Units.Li);
+     const ftAddr = toBech32Address(contractAddress);
+     try {
+      const contract = zilliqa.contracts.at(ftAddr);
+      await contract.call(
+       "BatchMint",
+       [
+        {
+         vname: "to_token_uri_pair_list",
+         type: "List (Pair (ByStr20) (String))",
+         value: batchMintParameters,
+        },
+       ],
+       {
+        // amount, gasPrice and gasLimit must be explicitly provided
+        version: VERSION,
+        amount: new BN(mintNumber * contractState.token_price),
+        gasPrice: myGasPrice,
+        gasLimit: Long.fromNumber(10000),
+       }
+      );
+      await eventLogSubscription();
+     } catch (error) {
+      console.log(error);
+     }
+  }
 
-  async function handleBatchBurn() {}
+  async function handleBatchBurn() {
+    setIsBatchBurning(true);
+ const batchBurnParameters = ownedTokenIDs;
+ setTicketsUsed(batchBurnParameters.length);
+ const zilliqa = window.zilPay;
+ const CHAIN_ID = 333;
+ const MSG_VERSION = 1;
+ const VERSION = bytes.pack(CHAIN_ID, MSG_VERSION);
+ const myGasPrice = units.toQa("2000", units.Units.Li);
+ const ftAddr = toBech32Address(contractAddress);
+ try {
+  const contract = zilliqa.contracts.at(ftAddr);
+  await contract.call(
+   "BatchBurn",
+   [
+    {
+     vname: "token_id_list",
+     type: "List (Uint256)",
+     value: batchBurnParameters,
+    },
+   ],
+   {
+    // amount, gasPrice and gasLimit must be explicitly provided
+    version: VERSION,
+    amount: new BN(0),
+    gasPrice: myGasPrice,
+    gasLimit: Long.fromNumber(10000),
+   }
+  );
+  await eventLogSubscription();
+ } catch (error) {
+  console.log(error);
+ }
+}
 
   async function eventLogSubscription() {
     const zilliqa = new Zilliqa("https://dev-api.zilliqa.com");
@@ -86,8 +233,12 @@ function App() {
 
     await subscriber.start();
   }
-
-  useEffect(() => {}, []);
+  useEffect(() => {
+    if (contractAddress) {
+     updateContractDetails();
+    }
+    setIsLoading(false);
+   }, [contractAddress, isLoading]);
 
   return (
     <div className="App">
